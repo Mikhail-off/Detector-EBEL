@@ -12,7 +12,7 @@ MARKUP_FOLDER = "Markup"
 IMAGES_EXT = ['.jpg', '.jpeg', '.png']
 MARKUP_EXT = '.csv'
 
-ANCHOR_SIZE = 4
+ANCHOR_SIZE = 16
 ANCHOR_SCALES = [1, 2, 4]
 ANCHOR_RATIOS = [0.5, 1., 2.]
 IOU_THRESHOLD_POSITIVE = 0.7
@@ -125,4 +125,17 @@ class ObjectDetectionDataset(Dataset):
 
 if __name__ == '__main__':
     target, mask = TargetMapCreator.generate_target_for_classification(4, 4, 2, torch.tensor([[3, 3, 3, 3]]))
-    print(mask)
+
+    img_size = 1000
+    image = Image.new("L", (img_size, img_size), color=255)
+    imageDraw = ImageDraw.Draw(image)
+    anchors, _, _ = TargetMapCreator.generate_target_anchors(img_size // 10, img_size // 10, 10)
+
+    anchors = ops.box_convert(anchors, 'xywh', 'xyxy')
+
+    step = (img_size // 10 * (img_size // 10 + 1)) // 2 * 9
+    for i in range(step, step + 9):
+        anchor = anchors[i].numpy()
+        print(anchor)
+        imageDraw.rectangle(anchor, outline=0)
+    image.save('image.png')
