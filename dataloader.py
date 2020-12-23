@@ -18,6 +18,7 @@ ANCHOR_RATIOS = [0.5, 1., 2.]
 IOU_THRESHOLD_POSITIVE = 0.7
 IOU_THRESHOLD_NEGATIVE = 0.3
 
+
 def is_image(image_path):
     return os.path.splitext(image_path)[-1].lower() in IMAGES_EXT
 
@@ -92,7 +93,6 @@ class TargetMapCreator:
         mask[negative_anchors_out_c, negative_anchors_out_y, negative_anchors_out_x] = 1
 
         return target, mask
-
 
 
 class ObjectDetectionDataset(Dataset):
