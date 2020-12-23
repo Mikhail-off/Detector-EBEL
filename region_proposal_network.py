@@ -8,4 +8,4 @@ class RPN(nn.Module):
         pass
 
     def forward(self, x):
-        pass
+        return x
