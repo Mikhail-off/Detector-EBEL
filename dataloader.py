@@ -29,8 +29,13 @@ class TargetMapCreator:
 
     @staticmethod
     def generate_anchors(anchor_size=ANCHOR_SIZE):
+        """
+        Генерирует онкеры(прямоугольники)
+        :param anchor_size: минимальный размер анкера на исходном изображении
+        :return: всего будет сгенерировано анкеров ANCHOR_SCALES * ANCHOR_RATIOS
+        """
         base_anchor = torch.tensor([0, 0, anchor_size, anchor_size])
-        base_anchor = ops.box_convert(base_anchor, 'xywh', 'cxcywh')
+        # base_anchor = ops.box_convert(base_anchor, 'xywh', 'cxcywh')
         size = torch.prod(base_anchor[2:])
         widths = torch.round(torch.sqrt(size / torch.tensor(ANCHOR_RATIOS)))
         heights = widths * torch.tensor(ANCHOR_RATIOS)
@@ -45,6 +50,15 @@ class TargetMapCreator:
 
     @staticmethod
     def generate_target_anchors(w_out, h_out, scale):
+        """
+        Генерирует в каждом пикселе выходного изображения набор анкеров
+        :param w_out: ширина выхода
+        :param h_out: высота выхода
+        :param scale: отнощение исходного изображения в выходному
+        :return: массив из анкеров для исходного изображения,
+            координаты центров для каждого анкера на выходном изображении
+            Всего их w_out * h_out * кол-во анкеров на один пиксель
+        """
         base_anchors = TargetMapCreator.generate_anchors()
         anchors = base_anchors.repeat(w_out * h_out, 1)
         out_xy_coords = torch.vstack((torch.arange(w_out).repeat(h_out), torch.repeat_interleave(torch.arange(h_out), w_out)))
@@ -52,12 +66,26 @@ class TargetMapCreator:
         shifts = (out_xy_coords * scale).T
 
         anchors[:, :2] += shifts
-        return anchors, out_xy_coords[0], out_xy_coords[1]
+        return anchors, out_xy_coords
 
 
     @staticmethod
     def generate_target_for_classification(w_out, h_out, scale, gt_bboxes):
-        anchors, out_x_coords, out_y_coords = TargetMapCreator.generate_target_anchors(w_out, h_out, scale)
+        """
+        смотрит на пересечения всех сгенерированных анкеров с gt_bboxesю
+        Если IoU > IOU_THRESHOLD_POSITIVE, анкер считается положительным для классификации
+        Если IoU < IOU_THRESHOLD_POSITIVE, выбирается один(!) анкер с максимальным IoU и он счиатется положительным
+        Если IoU < IOU_THRESHOLD_NEGATIVE, анкер считается негативным для классификации
+        Все остальные анкеры не участвуют в обучении
+        :param w_out: ширина выходного изображения
+        :param h_out: высота выходного изображения
+        :param scale: отношение исходного изображения к выходному
+        :param gt_bboxes: прямоугольники объектов с разметки
+        :return: тензор для бинарной классификации, маска для анкеров, которые уаствуют в обучении
+            размер тензора соответствует размеру выходного изображения
+            Внимание(!) маску можно использовать в качестве индексов, но она в стиле CHW
+        """
+        anchors, (out_x_coords, out_y_coords) = TargetMapCreator.generate_target_anchors(w_out, h_out, scale)
 
         gt_bboxes = ops.box_convert(gt_bboxes, 'xywh', 'xyxy')
         anchors = ops.box_convert(anchors, 'xywh', 'xyxy')
@@ -124,18 +152,28 @@ class ObjectDetectionDataset(Dataset):
 
 
 if __name__ == '__main__':
-    target, mask = TargetMapCreator.generate_target_for_classification(4, 4, 2, torch.tensor([[3, 3, 3, 3]]))
+    scale = 8
+    img_size = 224
+    gt_bboxes = torch.tensor([[20, 20, 130, 60]])
+    target, mask = TargetMapCreator.generate_target_for_classification(img_size // scale, img_size // scale, scale,
+                                                                       gt_bboxes)
 
-    img_size = 1000
-    image = Image.new("L", (img_size, img_size), color=255)
+    positive_anchors = target * mask
+    negative_anchors = torch.logical_not(target) * mask
+    print(torch.sum(positive_anchors), torch.sum(negative_anchors))
+
+    image = Image.new("RGB", (img_size, img_size), color=(255, 255, 255))
     imageDraw = ImageDraw.Draw(image)
-    anchors, _, _ = TargetMapCreator.generate_target_anchors(img_size // 10, img_size // 10, 10)
-
+    anchors, (_, _) = TargetMapCreator.generate_target_anchors(img_size // scale, img_size // scale, scale)
     anchors = ops.box_convert(anchors, 'xywh', 'xyxy')
 
-    step = (img_size // 10 * (img_size // 10 + 1)) // 2 * 9
-    for i in range(step, step + 9):
-        anchor = anchors[i].numpy()
+    anchors = anchors[positive_anchors.permute(1, 2, 0).contiguous().view(-1).bool()]
+
+    for anchor in anchors:
         print(anchor)
-        imageDraw.rectangle(anchor, outline=0)
-    image.save('image.png')
+        imageDraw.rectangle(anchor.tolist(), outline=(255, 0, 0))
+    for gt_bbox in gt_bboxes:
+        gt_bbox = ops.box_convert(gt_bbox, 'xywh', 'xyxy')
+        print(gt_bbox)
+        imageDraw.rectangle(gt_bbox.tolist(), outline=(0, 255, 0))
+    image.show()
